@@ -11,7 +11,6 @@ from .alerts_views import AlertsListAPIView, MarkAlertReadAPIView
 from .map_views import MapOverviewAPIView
 from .ingest_views import IngestIndustryReadingAPIView
 
-
 urlpatterns = [
     # Main app endpoints
     path("login/", LoginAPIView.as_view(), name="login"),
