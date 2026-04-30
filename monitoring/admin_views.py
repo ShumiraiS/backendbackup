@@ -41,7 +41,11 @@ def _get_thresholds_flat():
     or falls back to:
       thresholds.industry / thresholds.stp (merged)
     """
-    th = root_ref().child("thresholds").get() or {}
+    try:
+        th = root_ref().child("thresholds").get() or {}
+    except Exception:
+        thresholds = {}
+
     flat = th.get("flat")
     if isinstance(flat, dict) and flat:
         return flat
@@ -109,7 +113,7 @@ def _latest_snapshots():
         for site_id, payload in r.items():
             if isinstance(payload, dict):
                 ind_latest[site_id] = payload.get("latest") or {}
-    rs = db.child("readings_stp").get() or {}
+    rs = db.child("readings_stp").limit_to_last(20).get() or {}
     if isinstance(rs, dict):
         for site_id, payload in rs.items():
             if isinstance(payload, dict):
@@ -126,7 +130,11 @@ class AdminUsersAPIView(View):
     GET /api/admin/users/
     """
     def get(self, request):
-        users = root_ref().child("users").get() or {}
+        try:
+            users = root_ref().child("users").get() or {}
+        except Exception:
+            users = {}
+
         items = []
         if isinstance(users, dict):
             for employee_code, u in users.items():
@@ -210,7 +218,11 @@ class AdminSensorsAPIView(View):
         if group not in ("industry", "stp"):
             return JsonResponse({"error": "group must be industry or stp"}, status=400)
 
-        sensors = root_ref().child("sensors").child(group).get() or {}
+        try:
+            sensors = root_ref().child("sensors").get() or {}
+        except Exception:
+            sensors = {}
+
         items = []
         if isinstance(sensors, dict):
             for sensor_id, s in sensors.items():
@@ -303,7 +315,11 @@ class AdminActiveAlertsAPIView(View):
     GET /api/admin/alerts/active/
     """
     def get(self, request):
-        alerts = root_ref().child("alerts").get() or {}
+        try:
+            alerts = root_ref().child("alerts").get() or {}
+        except Exception:
+            alerts = {}
+
         items = []
 
         if isinstance(alerts, dict):

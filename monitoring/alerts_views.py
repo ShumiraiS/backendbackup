@@ -2,6 +2,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .firebase import root_ref
+from .auth_views import log_admin_action
+
 
 
 class AlertsListAPIView(APIView):
@@ -54,4 +56,16 @@ class MarkAlertReadAPIView(APIView):
             return Response({"error": "Alert not found"}, status=status.HTTP_404_NOT_FOUND)
 
         ref.child("read").set(True)
+
+        log_admin_action(
+            action="Alert Marked as Read",
+            performed_by=request.headers.get("X-User-Role"),
+            role=request.headers.get("X-User-Role"),
+            entity=site_id,
+            before="Unread",
+            after="Read",
+            severity="Medium",
+            request=request,
+        )
+
         return Response({"message": "Alert marked as read"}, status=status.HTTP_200_OK)

@@ -2,6 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
+from .alerts import maybe_create_alert
 from .firebase import root_ref
 from .compliance import assess_reading
 
@@ -21,30 +22,73 @@ class LatestReadingByIndustryAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Fetch latest reading for the industry
-        ref = root_ref().child("readings").child(industry_id)
-        data = ref.order_by_key().limit_to_last(1).get()
+        # Fetch latest readings for the industry
+        latest = root_ref().child("readings").child(industry_id).child("latest").get()
 
-        if not data:
-            return Response(
-                {"message": f"No readings found for {industry_id}."},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        if not latest:
+            return Response({
+                "latest": None,
+                "history": []
+            })
 
-        # Extract the single latest item
-        latest_key = list(data.keys())[0]
-        latest = data[latest_key] or {}
-        latest["id"] = latest_key
+        history = [latest]
         latest["industry_id"] = industry_id
 
-        # Fetch EMA thresholds and compute compliance
-        limits = root_ref().child("thresholds").child("industry").get() or {}
-        overall, per_param = assess_reading(latest, limits)
 
-        latest["compliance"] = overall
-        latest["parameter_status"] = per_param
+        # Fetch thresholds
+        raw_limits = root_ref().child("thresholds").get() or {}
 
-        # Dashboard-ready card format
+        ph_limit = raw_limits.get("pH", {}).get("limit")
+        ph_min = None
+        ph_max = None
+
+        if ph_limit and "-" in str(ph_limit):
+            parts = ph_limit.split("-")
+            ph_min = float(parts[0].strip())
+            ph_max = float(parts[1].strip())
+
+        limits = {
+            "ph_min": ph_min,
+            "ph_max": ph_max,
+            "temperature_max": raw_limits.get("Temperature", {}).get("limit"),
+            "suspended_solids_max": raw_limits.get("TSS", {}).get("limit"),
+        }
+
+        # Compute compliance for EACH reading
+        for item in history:
+            overall, per_param = assess_reading(item, limits)
+
+            item["compliance"] = overall
+            item["parameter_status"] = per_param
+
+            # 🚨 Trigger alert generation
+            maybe_create_alert(
+                site_type="industry",
+                site_id=industry_id,
+                reading=item,
+                compliance=overall,
+                anomaly=None
+            )
+
+        latest = history[-1]
+        latest_param_status = latest.get("parameter_status", {})
+        latest = history[-1]
+        latest_param_status = latest.get("parameter_status", {})
+
+        # --- Mapping + Display helpers ---
+        # Map human labels -> reading keys in Firebase
+        PARAM_KEY_MAP = {
+            "pH": "ph",
+            "PH": "ph",
+            "Ph": "ph",
+            "Temperature": "temperature",
+            "COD": "cod",
+            "Chlorides": "chlorides",
+            "Suspended Solids": "suspended_solids",
+            "TSS": "suspended_solids",
+            "Total Suspended Solids (TSS)": "suspended_solids",
+        }
+
         units = {
             "ph": "",
             "temperature": "°C",
@@ -61,47 +105,56 @@ class LatestReadingByIndustryAPIView(APIView):
             "suspended_solids": f'≤ {limits.get("suspended_solids_max")}',
         }
 
-        latest["cards"] = [
-            {
-                "key": "ph",
-                "label": "pH",
-                "value": latest.get("ph"),
-                "unit": units["ph"],
-                "status": per_param.get("ph"),
-                "limit": limits_display["ph"],
-            },
-            {
-                "key": "temperature",
-                "label": "Temperature",
-                "value": latest.get("temperature"),
-                "unit": units["temperature"],
-                "status": per_param.get("temperature"),
-                "limit": limits_display["temperature"],
-            },
-            {
-                "key": "cod",
-                "label": "COD",
-                "value": latest.get("cod"),
-                "unit": units["cod"],
-                "status": per_param.get("cod"),
-                "limit": limits_display["cod"],
-            },
-            {
-                "key": "chlorides",
-                "label": "Chlorides",
-                "value": latest.get("chlorides"),
-                "unit": units["chlorides"],
-                "status": per_param.get("chlorides"),
-                "limit": limits_display["chlorides"],
-            },
-            {
-                "key": "suspended_solids",
-                "label": "Suspended Solids",
-                "value": latest.get("suspended_solids"),
-                "unit": units["suspended_solids"],
-                "status": per_param.get("suspended_solids"),
-                "limit": limits_display["suspended_solids"],
-            },
-        ]
+        # --- 1) Try industry configured parameters ---
+        industry_details = root_ref().child("industries").child(industry_id).get() or {}
+        industry_parameters = industry_details.get("parameters") or []
 
-        return Response(latest, status=status.HTTP_200_OK)
+        # --- 2) If missing/empty, fallback to sensors assigned to this industry ---
+        sensors_used = []
+        if not industry_parameters:
+            sensors = root_ref().child("sensors").get() or {}
+            for _sid, s in sensors.items():
+                if s.get("industry_id") == industry_id and s.get("parameter"):
+                    sensors_used.append(s.get("parameter"))
+            # de-duplicate while keeping order
+            seen = set()
+            industry_parameters = []
+            for p in sensors_used:
+                if p not in seen:
+                    industry_parameters.append(p)
+                    seen.add(p)
+
+        # If STILL empty, do NOT default to 5. Show nothing.
+        cards = []
+        for label in industry_parameters:
+            # Normalise label -> key
+            key = PARAM_KEY_MAP.get(label)
+            if not key:
+                # last-resort normalisation
+                key = str(label).strip().lower().replace(" ", "_")
+
+            cards.append({
+                "key": key,
+                "label": label,
+                "value": latest.get(key),
+                "unit": units.get(key, ""),
+                "status": latest_param_status.get(key),
+                "limit": limits_display.get(key),
+            })
+
+        latest["cards"] = cards
+
+        return Response(
+            {
+                "latest": latest,
+                "history": history,
+                "debug": {
+                    "industry_id": industry_id,
+                    "industry_parameters_saved": industry_details.get("parameters", None),
+                    "sensors_parameters_used_if_fallback": sensors_used,
+                    "final_parameters_used": industry_parameters,
+                    "final_cards_count": len(cards),
+                }
+            },
+            status=status.HTTP_200_OK
+        )

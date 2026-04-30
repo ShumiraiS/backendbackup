@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from .firebase import root_ref
+from .email_alerts import send_alert_email
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -17,6 +18,7 @@ def create_alert(site_type: str, site_id: str, payload: dict):
 
     root_ref().child("alerts").child(site_type).child(site_id).child(alert_id).set(payload)
     return alert_id
+
 
 def maybe_create_alert(site_type: str, site_id: str, reading: dict, compliance: str, anomaly: dict | None):
     """
@@ -50,7 +52,10 @@ def maybe_create_alert(site_type: str, site_id: str, reading: dict, compliance: 
         alert_type = "COMPLIANCE_BREACH"
         severity = "HIGH"
         title = "Compliance breach detected"
-        message = "One or more parameters exceed EMA limits. Immediate attention is recommended."
+
+        breached = ", ".join(anomalous_params) if anomalous_params else "Unknown parameter"
+
+        message = f"The following parameter(s) exceeded EMA limits: {breached}. Immediate attention is recommended."
 
     elif is_anomaly:
         alert_type = "ANOMALY_DETECTED"
@@ -75,5 +80,7 @@ def maybe_create_alert(site_type: str, site_id: str, reading: dict, compliance: 
     }
 
     alert_id = create_alert(site_type, site_id, alert_payload)
+    send_alert_email(site_id, alert_payload, reading)
     last_key_ref.set(dedupe_key)
+
     return alert_id

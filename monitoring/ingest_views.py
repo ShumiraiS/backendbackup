@@ -2,17 +2,21 @@
 import json
 from datetime import datetime, timezone
 
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+
 from django.http import JsonResponse
 from django.views import View
 
 from .firebase import root_ref
 from .compliance import assess_reading
-
+from .alerts import maybe_create_alert
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class IngestIndustryReadingAPIView(View):
     """
     POST /api/ingest/industry/
@@ -50,8 +54,30 @@ class IngestIndustryReadingAPIView(View):
         db.child("readings").child(site_id).child("history").child(hist_key).set(reading)
 
         # 2) Compute compliance and write status node (nice for UI)
-        limits = db.child("thresholds").child("industry").get() or {}
+        raw_limits = db.child("thresholds").get() or {}
+
+        limits = {
+            "ph_min": raw_limits.get("ph", {}).get("min"),
+            "ph_max": raw_limits.get("ph", {}).get("max"),
+            "temperature_max": raw_limits.get("temperature", {}).get("max"),
+            "suspended_solids_max": raw_limits.get("TSS", {}).get("limit"),
+        }
+
         overall, per_param = assess_reading(reading, limits)
+
+        maybe_create_alert(
+            site_type="industry",
+            site_id=site_id,
+            reading=reading,
+            compliance=overall,
+            anomaly={
+                "anomaly_score": 100 if overall == "RED" else 0,
+                "is_anomaly": overall == "RED",
+                "anomalous_parameters": [
+                    p for p, s in per_param.items() if s == "RED"
+                ],
+            }
+        )
 
         db.child("status").child("industry").child(site_id).set({
             "compliance": overall,
@@ -59,17 +85,17 @@ class IngestIndustryReadingAPIView(View):
             "last_updated": reading["timestamp"]
         })
 
-        # 3) (Optional) Auto-create alert if RED
-        if overall == "RED":
-            alert_id = f"ALERT_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
-            red_params = [k for k, v in per_param.items() if v == "RED"]
-            db.child("alerts").child("industry").child(site_id).child(alert_id).set({
-                "severity": "HIGH",
-                "message": "Compliance breach detected from sensor upload",
-                "parameters": red_params,
-                "timestamp": reading["timestamp"],
-                "read": False,
-                "resolved": False
+        # 3) Store monitoring records snapshot
+        for param, status in per_param.items():
+            record_id = f"REC_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+
+            db.child("monitoring_records").child(record_id).set({
+                "industry": site_id,
+                "parameter": param,
+                "value": reading.get(param),
+                "threshold": limits.get(param, {}).get("limit"),
+                "status": "Compliant" if status == "GREEN" else "Non-Compliant",
+                "timestamp": reading["timestamp"]
             })
 
         return JsonResponse({

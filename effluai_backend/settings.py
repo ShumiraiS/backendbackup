@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from corsheaders.defaults import default_headers  # ✅ ADDED
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,7 +26,7 @@ SECRET_KEY = 'django-insecure-fk*ay-@q&ef49&s#doq8cqkdlo8konu82kuab3swpptlv7ipyc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -38,13 +39,12 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     "rest_framework",
-"corsheaders",
-"monitoring",
-
+    "corsheaders",
+    "monitoring",
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
+    "corsheaders.middleware.CorsMiddleware",  # must stay at top
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -125,7 +125,17 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ---------------- CORS CONFIG ----------------
+
 CORS_ALLOW_ALL_ORIGINS = True
+
+# ✅ Allow custom role header
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-user-role",
+]
+
+# ---------------- FIREBASE ----------------
 
 FIREBASE_CONFIG = {
     "apiKey": "YOUR_API_KEY",
@@ -137,3 +147,13 @@ FIREBASE_CONFIG = {
     "appId": "XXXX"
 }
 
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+
+EMAIL_HOST_USER = "effluai.alerts@gmail.com"
+EMAIL_HOST_PASSWORD = "aapmvquamwprsvmu"
+
+DEFAULT_FROM_EMAIL = "EffluAI Alerts <effluai.alerts@gmail.com>"

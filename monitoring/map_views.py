@@ -6,6 +6,24 @@ from .firebase import root_ref
 from .compliance import assess_reading
 
 
+import hashlib
+
+def get_fallback_coords(item_id, details):
+    lat = (details or {}).get("lat")
+    lng = (details or {}).get("lng")
+    if lat is not None and lng is not None:
+        try:
+            return float(lat), float(lng)
+        except (ValueError, TypeError):
+            pass
+            
+    # Deterministic fallback based on ID around Bulawayo (-20.15, 28.58)
+    h = int(hashlib.md5(item_id.encode()).hexdigest(), 16)
+    lat_offset = ((h % 1000) / 1000.0) * 0.1 - 0.05
+    lng_offset = (((h // 1000) % 1000) / 1000.0) * 0.1 - 0.05
+    
+    return -20.15 + lat_offset, 28.58 + lng_offset
+
 class MapOverviewAPIView(APIView):
     """
     GET /api/map/overview/
@@ -40,13 +58,15 @@ class MapOverviewAPIView(APIView):
                 status_badge = overall
                 last_updated = latest.get("timestamp")
 
+            lat, lng = get_fallback_coords(industry_id, details)
+
             markers.append({
                 "id": industry_id,
                 "type": "industry",
                 "name": (details or {}).get("name"),
-                "location": (details or {}).get("location"),
-                "lat": (details or {}).get("lat"),
-                "lng": (details or {}).get("lng"),
+                "location": (details or {}).get("address", (details or {}).get("location")),
+                "lat": lat,
+                "lng": lng,
                 "status": status_badge,
                 "last_updated": last_updated,
             })
@@ -73,13 +93,15 @@ class MapOverviewAPIView(APIView):
                 status_badge = overall
                 last_updated = latest.get("timestamp")
 
+            lat, lng = get_fallback_coords(stp_id, details)
+
             markers.append({
                 "id": stp_id,
                 "type": "stp",
                 "name": (details or {}).get("name"),
-                "location": (details or {}).get("location"),
-                "lat": (details or {}).get("lat"),
-                "lng": (details or {}).get("lng"),
+                "location": (details or {}).get("address", (details or {}).get("location")),
+                "lat": lat,
+                "lng": lng,
                 "status": status_badge,
                 "last_updated": last_updated,
             })
@@ -88,3 +110,4 @@ class MapOverviewAPIView(APIView):
             {"markers": markers, "count": len(markers)},
             status=status.HTTP_200_OK
         )
+

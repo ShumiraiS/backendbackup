@@ -1,6 +1,7 @@
 # monitoring/admin_urls.py
 from django.urls import path
 
+from .compliance_views import ComplianceHistoryAPIView
 from .admin_views import (
     AdminUsersAPIView,
     AdminApproveUserAPIView,
@@ -16,6 +17,8 @@ from .admin_views import (
 )
 
 urlpatterns = [
+
+    path("compliance-history/", ComplianceHistoryAPIView.as_view()),
     # Users
     path("users/", AdminUsersAPIView.as_view(), name="admin_users"),
     path("users/approve/", AdminApproveUserAPIView.as_view(), name="admin_users_approve"),

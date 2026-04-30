@@ -2,20 +2,26 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
+from datetime import datetime
+import uuid
+
 from .firebase import root_ref
 from .compliance import assess_reading
 
 
 class IndustriesListAPIView(APIView):
     """
-    GET /api/industries/
-    Returns industries list + status badge (GREEN/YELLOW/RED/OFFLINE).
+    GET  /api/industries/
+    POST /api/industries/
     """
 
     def get(self, request):
         industries = root_ref().child("industries").get()
         if not industries:
-            return Response({"message": "No industries found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"message": "No industries found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         # Pull thresholds once (EMA limits)
         limits = root_ref().child("thresholds").child("industry").get() or {}
@@ -52,3 +58,49 @@ class IndustriesListAPIView(APIView):
             result.append(payload)
 
         return Response(result, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        """
+        Create a new industry
+        """
+
+        name = request.data.get("name")
+        address = request.data.get("address")
+        contact_email = request.data.get("contact_email")
+
+        if not name:
+            return Response(
+                {"error": "Industry name is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Generate unique Industry ID
+        industry_id = f"IND_{uuid.uuid4().hex[:6].upper()}"
+
+        # Get parameters from request
+        parameters = request.data.get("parameters", [])
+
+        if not isinstance(parameters, list):
+            return Response(
+                {"error": "parameters must be a list"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = {
+            "name": name,
+            "address": address or "",
+            "contact_email": contact_email or "",
+            "parameters": parameters,  # ✅ THIS IS THE FIX
+            "created_at": datetime.utcnow().isoformat(),
+        }
+
+        # Save to Firebase
+        root_ref().child("industries").child(industry_id).set(payload)
+
+        return Response(
+            {
+                "message": "Industry created successfully.",
+                "industry_id": industry_id,
+            },
+            status=status.HTTP_201_CREATED,
+        )

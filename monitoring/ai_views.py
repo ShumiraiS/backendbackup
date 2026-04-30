@@ -6,6 +6,7 @@ from .firebase import root_ref
 from .compliance import assess_reading
 from .anomaly import anomaly_score_from_history
 from .alerts import maybe_create_alert
+from .inference_engine import run_inference
 
 
 def build_advice(overall, per_param, reading, context_label):
@@ -104,10 +105,20 @@ class AIAdviceAPIView(APIView):
         reading = data[latest_key] or {}
         reading["id"] = latest_key
 
+        print("SMART ADVISOR READING:", reading)
+
         history = [data[k] for k in keys[:-1]]
 
         overall, per_param = assess_reading(reading, limits)
+
+        # Run inference engine
+        triggered_rules = run_inference(reading)
+
         advice = build_advice(overall, per_param, reading, context_label)
+
+        # Add rule explanations
+        if triggered_rules:
+            advice["rule_triggers"] = triggered_rules
 
         advice["anomaly"] = anomaly_score_from_history(history, reading, z_threshold=2.0)
 
