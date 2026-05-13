@@ -43,65 +43,96 @@ class IngestIndustryReadingAPIView(View):
             "source": "esp32"
         }
 
-        # 1) Store to Firebase (latest + history)
-        db = root_ref()
+        try:
+            # 1) Store to Firebase (latest + history)
+            db = root_ref()
 
-        # latest snapshot
-        db.child("readings").child(site_id).child("latest").set(reading)
+            # latest snapshot
+            db.child("readings").child(site_id).child("latest").set(reading)
 
-        # history (auto key)
-        hist_key = datetime.now(timezone.utc).strftime("r%Y%m%d%H%M%S%f")
-        db.child("readings").child(site_id).child("history").child(hist_key).set(reading)
+            # history (auto key)
+            hist_key = datetime.now(timezone.utc).strftime("r%Y%m%d%H%M%S%f")
+            db.child("readings").child(site_id).child("history").child(hist_key).set(reading)
 
-        # 2) Compute compliance and write status node (nice for UI)
-        raw_limits = db.child("thresholds").get() or {}
+            # 2) Compute compliance and write status node
+            raw_limits = db.child("thresholds").get() or {}
+            
+            # Safe parsing of limits
+            def safe_get(d, *keys):
+                for k in keys:
+                    if isinstance(d, dict):
+                        d = d.get(k, {})
+                    else:
+                        return None
+                return d if not isinstance(d, dict) else None
 
-        limits = {
-            "ph_min": raw_limits.get("ph", {}).get("min"),
-            "ph_max": raw_limits.get("ph", {}).get("max"),
-            "temperature_max": raw_limits.get("temperature", {}).get("max"),
-            "suspended_solids_max": raw_limits.get("TSS", {}).get("limit"),
-        }
-
-        overall, per_param = assess_reading(reading, limits)
-
-        maybe_create_alert(
-            site_type="industry",
-            site_id=site_id,
-            reading=reading,
-            compliance=overall,
-            anomaly={
-                "anomaly_score": 100 if overall == "RED" else 0,
-                "is_anomaly": overall == "RED",
-                "anomalous_parameters": [
-                    p for p, s in per_param.items() if s == "RED"
-                ],
+            limits = {
+                "ph_min": safe_get(raw_limits, "ph", "min"),
+                "ph_max": safe_get(raw_limits, "ph", "max"),
+                "temperature_max": safe_get(raw_limits, "temperature", "max"),
+                "suspended_solids_max": safe_get(raw_limits, "TSS", "limit"),
             }
-        )
 
-        db.child("status").child("industry").child(site_id).set({
-            "compliance": overall,
-            "parameter_status": per_param,
-            "last_updated": reading["timestamp"]
-        })
+            overall, per_param = assess_reading(reading, limits)
 
-        # 3) Store monitoring records snapshot
-        for param, status in per_param.items():
-            record_id = f"REC_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+            # 3) Alert logic
+            try:
+                maybe_create_alert(
+                    site_type="industry",
+                    site_id=site_id,
+                    reading=reading,
+                    compliance=overall,
+                    anomaly={
+                        "anomaly_score": 100 if overall == "RED" else 0,
+                        "is_anomaly": overall == "RED",
+                        "anomalous_parameters": [
+                            p for p, s in per_param.items() if s == "RED"
+                        ],
+                    }
+                )
+            except Exception as alert_err:
+                print(f"Alert creation failed: {alert_err}")
 
-            db.child("monitoring_records").child(record_id).set({
-                "industry": site_id,
-                "parameter": param,
-                "value": reading.get(param),
-                "threshold": limits.get(param, {}).get("limit"),
-                "status": "Compliant" if status == "GREEN" else "Non-Compliant",
-                "timestamp": reading["timestamp"]
+            db.child("status").child("industry").child(site_id).set({
+                "compliance": overall,
+                "parameter_status": per_param,
+                "last_updated": reading["timestamp"]
             })
 
-        return JsonResponse({
-            "status": "ok",
-            "site_id": site_id,
-            "stored_timestamp": reading["timestamp"],
-            "compliance": overall,
-            "parameter_status": per_param
-        })
+            # 4) Store monitoring records snapshot
+            for param, status in per_param.items():
+                record_id = f"REC_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+                
+                # Get specific threshold for this param
+                thresh = None
+                if param == "ph":
+                    thresh = f"{limits.get('ph_min')} - {limits.get('ph_max')}"
+                elif param == "temperature":
+                    thresh = limits.get("temperature_max")
+                elif param == "suspended_solids":
+                    thresh = limits.get("suspended_solids_max")
+
+                db.child("monitoring_records").child(record_id).set({
+                    "industry": site_id,
+                    "parameter": param,
+                    "value": reading.get(param),
+                    "threshold": str(thresh) if thresh is not None else "N/A",
+                    "status": "Compliant" if status == "GREEN" else "Non-Compliant",
+                    "timestamp": reading["timestamp"]
+                })
+
+            return JsonResponse({
+                "status": "ok",
+                "site_id": site_id,
+                "stored_timestamp": reading["timestamp"],
+                "compliance": overall,
+                "parameter_status": per_param
+            })
+
+        except Exception as db_err:
+            print(f"Database/Ingest Error: {db_err}")
+            # If DEBUG is True, we return the error, otherwise generic
+            from django.conf import settings
+            if settings.DEBUG:
+                return JsonResponse({"error": str(db_err)}, status=500)
+            return JsonResponse({"error": "Internal database error"}, status=500)
