@@ -31,15 +31,16 @@ def get_recommendation(reading):
 
 
 def send_alert_email(site_id, alert_payload, reading=None):
+    def _send():
+        try:
+            subject = f"EffluAI Alert - {alert_payload['title']}"
 
-    subject = f"EffluAI Alert - {alert_payload['title']}"
+            values_section = ""
+            recommendation_section = ""
 
-    values_section = ""
-    recommendation_section = ""
+            if reading:
 
-    if reading:
-
-        values_section = f"""
+                values_section = f"""
 Sensor Readings
 
 pH: {reading.get('ph')}
@@ -49,13 +50,13 @@ Chlorides: {reading.get('chlorides')}
 COD: {reading.get('cod')}
 """
 
-        recommendation_section = f"""
+                recommendation_section = f"""
 
 Recommended Action
 {get_recommendation(reading)}
 """
 
-    message = f"""
+            message = f"""
 EffluAI Compliance Alert
 
 Industry: {site_id}
@@ -79,13 +80,19 @@ Compliance Status:
 This alert was generated automatically by the EffluAI monitoring system.
 """
 
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [
-            "shumiraishiri@gmail.com",
-            "shiriyapindashumirai@gmail.com",
-        ],
-        fail_silently=False,
-    )
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [
+                    "shumiraishiri@gmail.com",
+                    "shiriyapindashumirai@gmail.com",
+                ],
+                fail_silently=True,
+            )
+        except Exception as e:
+            print(f"Error sending email: {e}")
+
+    # Run in a background thread so it doesn't block the request
+    thread = threading.Thread(target=_send)
+    thread.start()
