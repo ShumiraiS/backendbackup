@@ -20,7 +20,7 @@ def _now_iso():
 class IngestIndustryReadingAPIView(View):
     """
     POST /api/ingest/industry/
-    Body: {site_id, timestamp?, ph, temperature, cod, chlorides, suspended_solids}
+    Body: {site_id, timestamp?, ph, temperature, cod, chlorides, suspended_solids, water_level}
     """
 
     def post(self, request):
@@ -40,6 +40,7 @@ class IngestIndustryReadingAPIView(View):
             "cod": payload.get("cod"),
             "chlorides": payload.get("chlorides"),
             "suspended_solids": payload.get("suspended_solids"),
+            "water_level": payload.get("water_level"),
             "source": "esp32"
         }
 
@@ -70,6 +71,8 @@ class IngestIndustryReadingAPIView(View):
                 "ph_min": safe_get(raw_limits, "ph", "min"),
                 "ph_max": safe_get(raw_limits, "ph", "max"),
                 "temperature_max": safe_get(raw_limits, "temperature", "max"),
+                "cod_max": safe_get(raw_limits, "cod", "max"),
+                "chlorides_max": safe_get(raw_limits, "chlorides", "max"),
                 "suspended_solids_max": safe_get(raw_limits, "TSS", "limit"),
             }
 
