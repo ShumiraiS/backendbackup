@@ -77,13 +77,13 @@ class AIAdviceAPIView(APIView):
 
         if industry_id:
             context_label = f"Industry {industry_id}"
-            limits = root_ref().child("thresholds").child("industry").get() or {}
+            raw_limits = root_ref().child("thresholds").get() or {}
             ref = root_ref().child("readings").child(industry_id)
             site_type = "industry"
             site_id = industry_id
         else:
             context_label = f"STP {stp_id}"
-            limits = root_ref().child("thresholds").child("stp").get() or {}
+            raw_limits = root_ref().child("thresholds").get() or {}
             ref = root_ref().child("readings_stp").child(stp_id)
             site_type = "stp"
             site_id = stp_id
@@ -100,6 +100,33 @@ class AIAdviceAPIView(APIView):
         print("SMART ADVISOR READING:", reading)
 
         history = [data[k] for k in keys[:-1]]
+
+        # Parse pH range (e.g., "6 - 9")
+        ph_limit_str = raw_limits.get("pH", {}).get("limit", "6 - 9")
+        try:
+            parts = str(ph_limit_str).split("-")
+            ph_min = float(parts[0].strip())
+            ph_max = float(parts[1].strip())
+        except Exception:
+            ph_min = 6.0
+            ph_max = 9.0
+
+        # Helper to safely parse float limits
+        def _parse_limit(param_name, default_val):
+            val = raw_limits.get(param_name, {}).get("limit")
+            try:
+                return float(val) if val is not None else default_val
+            except (ValueError, TypeError):
+                return default_val
+
+        limits = {
+            "ph_min": ph_min,
+            "ph_max": ph_max,
+            "temperature_max": _parse_limit("Temperature", 40.0),
+            "suspended_solids_max": _parse_limit("TSS", 200.0),
+            "cod_max": _parse_limit("COD", 250.0),
+            "chlorides_max": _parse_limit("Chlorides", 1000.0),
+        }
 
         overall, per_param = assess_reading(reading, limits)
 
