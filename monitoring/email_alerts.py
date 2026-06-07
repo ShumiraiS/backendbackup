@@ -415,6 +415,13 @@ This alert was generated automatically by the EffluAI monitoring system.
                     response.raise_for_status()
                     # Successfully sent via Resend API
                     return
+                except requests.exceptions.HTTPError as http_err:
+                    err_msg = ""
+                    try:
+                        err_msg = response.json()
+                    except Exception:
+                        err_msg = response.text
+                    print(f"Resend API HTTP error: {http_err}. Details: {err_msg}. Falling back to SMTP.")
                 except Exception as e:
                     # Fall back to standard SMTP on error
                     print(f"Failed to send email via Resend API: {e}. Falling back to SMTP.")
