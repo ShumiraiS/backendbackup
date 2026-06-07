@@ -7,6 +7,7 @@ from .compliance import assess_reading
 from .anomaly import anomaly_score_from_history
 from .alerts import maybe_create_alert
 from .inference_engine import run_inference
+from .email_alerts import get_recommendation_list
 
 
 def build_advice(overall, per_param, reading, context_label):
@@ -24,25 +25,16 @@ def build_advice(overall, per_param, reading, context_label):
     reasons = [f"{names[p]} is outside the EMA limit" for p in red_params]
     reasons += [f"{names[p]} is close to the EMA limit" for p in yellow_params]
 
-    if overall == "RED":
-        priority = "HIGH"
-        summary = f"{context_label}: Non-compliant discharge detected. Immediate action is recommended."
-        actions = [
-            "Verify readings with a confirmatory sample and calibrate sensors if necessary.",
-            "Inspect treatment stages and check for process upsets contributing to high pollution load.",
-            "Implement corrective steps (e.g., pre-treatment optimisation, sedimentation/filtration checks).",
-            "Increase monitoring frequency until readings stabilise within limits."
-        ]
-        who = ["Industry operator", "Urban council", "EMA officer"]
-    elif overall == "YELLOW":
-        priority = "MEDIUM"
-        summary = f"{context_label}: Potential compliance risk. Preventative action is recommended."
-        actions = [
-            "Repeat sampling to confirm the trend and monitor more frequently.",
-            "Review operations/maintenance to prevent a breach.",
-            "Apply minor process adjustments to bring values comfortably within limits."
-        ]
-        who = ["Industry operator", "Urban council"]
+    if overall in ["RED", "YELLOW"]:
+        priority = "HIGH" if overall == "RED" else "MEDIUM"
+        summary = (
+            f"{context_label}: Non-compliant discharge detected. Immediate action is recommended."
+            if overall == "RED"
+            else f"{context_label}: Potential compliance risk. Preventative action is recommended."
+        )
+        # Fetch dynamic parameter-specific recommendations matching email alerts
+        actions = get_recommendation_list(reading)
+        who = ["Industry operator", "Urban council", "EMA officer"] if overall == "RED" else ["Industry operator", "Urban council"]
     else:
         priority = "LOW"
         summary = f"{context_label}: Readings appear compliant with EMA limits."
