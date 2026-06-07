@@ -57,23 +57,32 @@ class IngestIndustryReadingAPIView(View):
 
             # 2) Compute compliance and write status node
             raw_limits = db.child("thresholds").get() or {}
-            
-            # Safe parsing of limits
-            def safe_get(d, *keys):
-                for k in keys:
-                    if isinstance(d, dict):
-                        d = d.get(k, {})
-                    else:
-                        return None
-                return d if not isinstance(d, dict) else None
+
+            # Parse pH range (e.g., "6 - 9")
+            ph_limit_str = raw_limits.get("pH", {}).get("limit", "6 - 9")
+            try:
+                parts = str(ph_limit_str).split("-")
+                ph_min = float(parts[0].strip())
+                ph_max = float(parts[1].strip())
+            except Exception:
+                ph_min = 6.0
+                ph_max = 9.0
+
+            # Helper to safely parse float limits
+            def _parse_limit(param_name, default_val):
+                val = raw_limits.get(param_name, {}).get("limit")
+                try:
+                    return float(val) if val is not None else default_val
+                except (ValueError, TypeError):
+                    return default_val
 
             limits = {
-                "ph_min": safe_get(raw_limits, "ph", "min"),
-                "ph_max": safe_get(raw_limits, "ph", "max"),
-                "temperature_max": safe_get(raw_limits, "temperature", "max"),
-                "cod_max": safe_get(raw_limits, "cod", "max"),
-                "chlorides_max": safe_get(raw_limits, "chlorides", "max"),
-                "suspended_solids_max": safe_get(raw_limits, "TSS", "limit"),
+                "ph_min": ph_min,
+                "ph_max": ph_max,
+                "temperature_max": _parse_limit("Temperature", 40.0),
+                "suspended_solids_max": _parse_limit("TSS", 200.0),
+                "cod_max": _parse_limit("COD", 250.0),
+                "chlorides_max": _parse_limit("Chlorides", 1000.0),
             }
 
             overall, per_param = assess_reading(reading, limits)
@@ -102,25 +111,25 @@ class IngestIndustryReadingAPIView(View):
                 "last_updated": reading["timestamp"]
             })
 
+            # Thresholds mapping for monitoring record storage
+            thresholds_map = {
+                "ph": raw_limits.get("pH", {}).get("limit", "6 - 9"),
+                "temperature": raw_limits.get("Temperature", {}).get("limit", 40),
+                "suspended_solids": raw_limits.get("TSS", {}).get("limit", 200),
+                "cod": raw_limits.get("COD", {}).get("limit", 250),
+                "chlorides": raw_limits.get("Chlorides", {}).get("limit", 1000),
+            }
+
             # 4) Store monitoring records snapshot
             for param, status in per_param.items():
                 record_id = f"REC_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
-                
-                # Get specific threshold for this param
-                thresh = None
-                if param == "ph":
-                    thresh = f"{limits.get('ph_min')} - {limits.get('ph_max')}"
-                elif param == "temperature":
-                    thresh = limits.get("temperature_max")
-                elif param == "suspended_solids":
-                    thresh = limits.get("suspended_solids_max")
 
                 db.child("monitoring_records").child(record_id).set({
                     "industry": site_id,
                     "parameter": param,
                     "value": reading.get(param),
-                    "threshold": str(thresh) if thresh is not None else "N/A",
-                    "status": "Compliant" if status == "GREEN" else "Non-Compliant",
+                    "threshold": thresholds_map.get(param, "N/A"),
+                    "status": "Compliant" if status in ("GREEN", "YELLOW") else "Non-Compliant",
                     "timestamp": reading["timestamp"]
                 })
 
