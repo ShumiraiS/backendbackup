@@ -395,6 +395,10 @@ This alert was generated automatically by the EffluAI monitoring system.
                 if "gmail.com" in from_email.lower():
                     from_email = "EffluAI Alerts <onboarding@resend.dev>"
 
+                # Filter to only the verified owner in Resend sandbox mode
+                if "onboarding@resend.dev" in from_email:
+                    recipients = ["shiriyapindashumirai@gmail.com"]
+
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
