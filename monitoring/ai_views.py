@@ -150,4 +150,11 @@ class AIAdviceAPIView(APIView):
             anomaly=advice.get("anomaly")
         )
 
+        advice["debug_info"] = {
+            "reading_evaluated": reading,
+            "limits_used": limits,
+            "per_param_calculated": per_param,
+            "overall_status_calculated": overall
+        }
+
         return Response(advice, status=status.HTTP_200_OK)
