@@ -90,7 +90,19 @@ class AIAdviceAPIView(APIView):
 
         data = ref.order_by_key().limit_to_last(20).get()
         if not data:
-            return Response({"message": "No readings found for the selected site."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "overall_status": "GREEN",
+                "priority": "LOW",
+                "summary": f"{context_label}: No telemetry readings recorded yet.",
+                "reasons": [],
+                "recommended_actions": [
+                    "Ensure sensor node is online and transmitting telemetry.",
+                    "Verify Firebase real-time database connection status."
+                ],
+                "who_should_act": ["Industry operator"],
+                "notes": ["Awaiting first telemetry transmission from the facility."],
+                "timestamp": None
+            }, status=status.HTTP_200_OK)
 
         keys = sorted(list(data.keys()))
         latest_key = keys[-1]
@@ -149,12 +161,5 @@ class AIAdviceAPIView(APIView):
             compliance=overall,
             anomaly=advice.get("anomaly")
         )
-
-        advice["debug_info"] = {
-            "reading_evaluated": reading,
-            "limits_used": limits,
-            "per_param_calculated": per_param,
-            "overall_status_calculated": overall
-        }
 
         return Response(advice, status=status.HTTP_200_OK)
